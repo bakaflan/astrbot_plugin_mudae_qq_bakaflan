@@ -26,5 +26,12 @@
       "hint": "到达后会无法收集更多角色",
       "obvious_hint": true,
       "default": 20
+    },
+    "custom_images_limit": {
+      "description": "每个角色自定义图片数量上限",
+      "type": "int",
+      "hint": "超过后会无法添加自定义图片",
+      "obvious_hint": true,
+      "default": 5
     }
 }

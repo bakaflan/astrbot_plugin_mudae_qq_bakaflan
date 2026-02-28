@@ -2,8 +2,11 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.core.star.filter.platform_adapter_type import PlatformAdapterType
 from astrbot.api.star import Context, Star, register
 from astrbot.api import AstrBotConfig, logger
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 import astrbot.api.message_components as Comp
+import os
 import time
+import aiohttp
 from .util.character_manager import CharacterManager
 import random
 import asyncio
@@ -20,15 +23,22 @@ class CCB_Plugin(Star):
         self.draw_hourly_limit_default = self.config.draw_hourly_limit or 5
         self.claim_cooldown_default = self.config.claim_cooldown or 3600
         self.harem_max_size_default = self.config.harem_max_size or 10
+        self.custom_images_limit_default = self.config.custom_images_limit or 5
         self.group_cfgs = {}
         self.user_lists = {}
         self.group_locks = {}
+        self.plugin_data_path = f"{get_astrbot_data_path()}/plugin_data/astrbot_plugin_mudae_qq"
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
+        if not os.path.exists(self.plugin_data_path):
+            os.makedirs(self.plugin_data_path, exist_ok=True)
         chars = self.char_manager.load_characters()
         if not chars:
             raise RuntimeError("无法加载角色数据：characters.json 缺失或格式错误")
+        bonds = self.char_manager.load_bonds()
+        if not bonds:
+            raise RuntimeError("无法加载羁绊数据：bonds.json 缺失或格式错误")
 
     async def get_group_cfg(self, gid):
         if gid not in self.group_cfgs:
@@ -128,10 +138,13 @@ class CCB_Plugin(Star):
             "抽卡/ck",
             "离婚 <角色ID>",
             "最爱 <角色ID>",
-            "查询 <角色ID>",
+            "查询 <角色ID> [图片序号]",
             "搜索 <角色名称>",
             "我的后宫",
             "我的后宫 <页码>",
+            "群排行",
+            "添加图片 <角色ID>",
+            "清除图片 <角色ID>",
             "交换 <我的角色ID> <对方角色ID>",
             "许愿 <角色ID>",
             "愿望单",
@@ -200,9 +213,12 @@ class CCB_Plugin(Star):
                 yield event.plain_result("卡池数据未加载")
                 return
             name = character.get("name", "未知角色")
-            images = character.get("image") or []
-            image_url = random.choice(images) if images else None
             char_id = character.get("id")
+            images = character.get("image") or []
+            custom_paths = await self.get_kv_data(f"{gid}:{char_id}:custom_images", []) if char_id is not None else []
+            custom_paths = [os.path.join(self.plugin_data_path, p) for p in custom_paths]
+            pool = images + custom_paths
+            image_url = random.choice(pool) if pool else None
             married_to = None
             if char_id is not None:
                 claimed_by = await self.get_kv_data(f"{gid}:{char_id}:married_to", None)
@@ -212,7 +228,12 @@ class CCB_Plugin(Star):
             wished_by = await self.get_kv_data(wished_by_key, [])
             
             cq_message = []
-            if not married_to and wished_by:
+            ntr_chance = config.get("ntr_chance", 0)
+            if married_to is not None and random.random() < ntr_chance*(1+len(wished_by)) / 100:
+                allow_ntr = True
+            else:
+                allow_ntr = False
+            if wished_by and (allow_ntr or not married_to):
                 for wisher in wished_by:
                     cq_message.append({"type": "at", "data": {"qq": wisher}})
                 cq_message.append({"type": "text", "data": {"text": f" 已许愿\n{name}"}})
@@ -236,7 +257,7 @@ class CCB_Plugin(Star):
                 msg_id = resp.get("message_id") if isinstance(resp, dict) else None
                 await self.put_kv_data(key, (bucket, next_count))
                 await self.put_kv_data(f"{gid}:last_draw", now_ts)
-                if msg_id is not None and not married_to:
+                if msg_id is not None and (allow_ntr or not married_to):
                     # Maintain a small index; delete expired records
                     idx = await self.get_kv_data(f"{gid}:draw_msg_index", [])
                     cutoff = now_ts - DRAW_MSG_TTL
@@ -263,8 +284,12 @@ class CCB_Plugin(Star):
                             "ts": now_ts,
                         },
                     )
-                    # 使用NapCat的API贴一个爱心表情
-                    await event.bot.api.call_action("set_msg_emoji_like", message_id=msg_id, emoji_id=66, set=True)
+                    # 使用NapCat的API贴一个表情
+                    if allow_ntr:
+                        emoji_id = 128046 # 牛头
+                    else:
+                        emoji_id = 66 # 爱心
+                    await event.bot.api.call_action("set_msg_emoji_like", message_id=msg_id, emoji_id=emoji_id, set=True)
             except Exception as e:
                 logger.error({"stage": "draw_send_error_bot", "error": repr(e)})
 
@@ -288,8 +313,15 @@ class CCB_Plugin(Star):
             if ts and (now_ts - ts > DRAW_MSG_TTL):
                 return
             char_id = draw_msg.get("char_id")
+            char = self.char_manager.get_character_by_id(char_id)
+            if not char:
+                return
             claimed_by = await self.get_kv_data(f"{gid}:{char_id}:married_to", None)
-            if claimed_by:
+            if claimed_by == user_id:
+                yield event.chain_result([
+                    Comp.At(qq=user_id),
+                    Comp.Plain(f"\u200b\n{char.get('name')} 保卫成功！")
+                ])
                 return
             last_claim_ts = await self.get_kv_data(f"{gid}:{user_id}:last_claim", 0)
             if (now_ts - last_claim_ts) < cooldown:
@@ -302,39 +334,71 @@ class CCB_Plugin(Star):
                 await self.put_kv_data(f"{gid}:draw_msg:{msg_id}", draw_msg)
                 return
             
-            char_id = draw_msg.get("char_id")
-            char = self.char_manager.get_character_by_id(char_id)
-            if not char:
-                return
-            
-            # Track per-user marriage list
+            # Claim path (NTR or normal): size check first
             marry_list_key = f"{gid}:{user_id}:partners"
             marry_list = await self.get_kv_data(marry_list_key, [])
-            if len(marry_list) >= config.get("harem_max_size", self.harem_max_size_default):
+            harem_max = config.get("harem_max_size", self.harem_max_size_default)
+            if len(marry_list) >= harem_max:
                 yield event.chain_result([
                     Comp.At(qq=user_id),
-                    Comp.Plain(f" 你的后宫已满{config.get('harem_max_size', self.harem_max_size_default)}，无法再结婚。")
+                    Comp.Plain(f" 你的后宫已满{harem_max}，无法再结婚。")
                 ])
                 await self.put_kv_data(f"{gid}:draw_msg:{msg_id}", draw_msg)
                 return
-            if str(char_id) not in marry_list:
-                marry_list.append(str(char_id))
-            await self.put_kv_data(marry_list_key, marry_list)
-            await self.put_kv_data(f"{gid}:{char_id}:married_to", user_id)
-            await self.put_kv_data(f"{gid}:{user_id}:last_claim", now_ts)
-            gender = char.get("gender")
-            if gender == "女":
-                title = "老婆"
-            elif gender == "男":
-                title = "老公"
+
+            if claimed_by:
+                prev_fav = await self.get_kv_data(f"{gid}:{claimed_by}:fav", None)
+                if prev_fav is not None and str(prev_fav) == str(char_id):
+                    yield event.chain_result([
+                        Comp.At(qq=user_id),
+                        Comp.Plain("\u200b\n失败了！该角色是对方的最爱")
+                    ])
+                    return
+                # NTR: Delete old relationship, create new (marry_list already fetched and size-checked)
+                prev_marry_key = f"{gid}:{claimed_by}:partners"
+                prev_marry_list = await self.get_kv_data(prev_marry_key, [])
+                prev_marry_list = [m for m in prev_marry_list if m != str(char_id)]
+                await self.put_kv_data(prev_marry_key, prev_marry_list)
+                await self.delete_kv_data(f"{gid}:{char_id}:married_to")
+                # Create new relationship
+                if str(char_id) not in marry_list:
+                    marry_list.append(str(char_id))
+                await self.put_kv_data(marry_list_key, marry_list)
+                await self.put_kv_data(f"{gid}:{char_id}:married_to", user_id)
+                await self.put_kv_data(f"{gid}:{user_id}:last_claim", now_ts)
+                gender = char.get("gender")
+                if gender == "女":
+                    title = "老婆"
+                elif gender == "男":
+                    title = "老公"
+                else:
+                    title = ""
+                yield event.chain_result([
+                    Comp.Reply(id=msg_id),
+                    Comp.Plain(f"🐮 {char.get('name')} 是 "),
+                    Comp.At(qq=user_id),
+                    Comp.Plain(f" 的{title}了！🐮"),
+                ])
             else:
-                title = ""
-            yield event.chain_result([
-                Comp.Reply(id=msg_id),
-                Comp.Plain(f"🎉 {char.get('name')} 是 "),
-                Comp.At(qq=user_id),
-                Comp.Plain(f" 的{title}了！🎉")
-            ])
+                # Normal claim (marry_list already fetched and size-checked)
+                if str(char_id) not in marry_list:
+                    marry_list.append(str(char_id))
+                await self.put_kv_data(marry_list_key, marry_list)
+                await self.put_kv_data(f"{gid}:{char_id}:married_to", user_id)
+                await self.put_kv_data(f"{gid}:{user_id}:last_claim", now_ts)
+                gender = char.get("gender")
+                if gender == "女":
+                    title = "老婆"
+                elif gender == "男":
+                    title = "老公"
+                else:
+                    title = ""
+                yield event.chain_result([
+                    Comp.Reply(id=msg_id),
+                    Comp.Plain(f"🎉 {char.get('name')} 是 "),
+                    Comp.At(qq=user_id),
+                    Comp.Plain(f" 的{title}了！🎉")
+                ])
 
     @filter.command("我的后宫")
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
@@ -343,82 +407,114 @@ class CCB_Plugin(Star):
         event.call_llm = True
         gid = event.get_group_id() or "global"
         uid = str(event.get_sender_id())
-        marry_list_key = f"{gid}:{uid}:partners"
-        marry_list = await self.get_kv_data(marry_list_key, [])
-        if not marry_list:
-            yield event.chain_result([
-                Comp.Reply(id=event.message_obj.message_id),
-                Comp.At(qq=uid),
-                Comp.Plain("，你的后宫空空如也。")
-            ])
-            return
-        lines = []
-        per_page = 10
-        fav = await self.get_kv_data(f"{gid}:{uid}:fav", None)
-        total_heat = 0
-        entries = []
-        for cid in marry_list:
-            char = self.char_manager.get_character_by_id(cid)
-            if char is None:
-                continue
-            heat = char.get("heat") or 0
-            total_heat += heat
-            fav_mark = ""
-            if fav and str(fav) == str(cid):
-                fav_mark = "⭐"
-            entries.append(f"{fav_mark}{char.get('name')} (ID: {cid})")
-        if page == 0:
-            sender_name = event.get_sender_name() or event.get_sender_id()
-            header_parts = [
-                Comp.Plain(f"{sender_name}的后宫\n总人气: {total_heat}")
-            ]
+        lock = self._get_group_lock(gid)
+        async with lock:
+            marry_list_key = f"{gid}:{uid}:partners"
+            marry_list = await self.get_kv_data(marry_list_key, [])
+            if not marry_list:
+                yield event.chain_result([
+                    Comp.Reply(id=event.message_obj.message_id),
+                    Comp.At(qq=uid),
+                    Comp.Plain("，你的后宫空空如也。")
+                ])
+                return
+            lines = []
+            per_page = 10
+            fav = await self.get_kv_data(f"{gid}:{uid}:fav", None)
+            bond_status_list = self.char_manager.get_bond_collection_status(marry_list)
+            char_bond_ratio = {}
+            for name, owned, total, ratio, owned_cids in bond_status_list:
+                for cid in owned_cids:
+                    char_bond_ratio[cid] = max(char_bond_ratio.get(cid, 1.0), ratio)
+            total_heat = 0
+            entries = []
+            for cid in marry_list:
+                char = self.char_manager.get_character_by_id(cid)
+                if char is None:
+                    continue
+                base_heat = float(char.get("heat") or 0)
+                wished_by = await self.get_kv_data(f"{gid}:{cid}:wished_by", [])
+                num_wishers = len(wished_by)
+                bond_ratio = char_bond_ratio.get(int(cid), 1.0)
+                effective_heat = base_heat * (1.1 ** num_wishers) * bond_ratio
+                heat_int = int(round(effective_heat))
+                total_heat += heat_int
+                fav_mark = ""
+                if fav and str(fav) == str(cid):
+                    fav_mark = "⭐"
+                line = f"{fav_mark}{char.get('name')} (ID: {cid})"
+                if (num_wishers or bond_ratio > 1) and base_heat > 0:
+                    pct_increase = (effective_heat - base_heat) / base_heat * 100
+                    line += f" (+{pct_increase:.1f}%)"
+                entries.append(line)
+            harem_heats_key = f"{gid}_harem_heats"
+            harem_heats = await self.get_kv_data(harem_heats_key, {}) or {}
+            harem_heats[uid] = total_heat
+            await self.put_kv_data(harem_heats_key, harem_heats)
+            if page == 0:
+                sender_name = event.get_sender_name() or event.get_sender_id()
+                header_parts = [
+                    Comp.Plain(f"{sender_name}的后宫\n总人气: {total_heat}")
+                ]
+                if fav and str(fav) in marry_list:
+                    fav_char = self.char_manager.get_character_by_id(fav)
+                    if fav_char:
+                        images = fav_char.get("image") or []
+                        image_url = random.choice(images) if images else None
+                        if image_url:
+                            header_parts.insert(0, Comp.Image.fromURL(image_url))
+                node_list = [
+                    Comp.Node(
+                        uin=event.get_self_id(),
+                        name=f"{sender_name}的后宫",
+                        content=header_parts
+                    )
+                ]
+                for idx in range(0, len(entries), per_page):
+                    chunk = entries[idx:idx + per_page]
+                    node_list.append(
+                        Comp.Node(
+                            uin=event.get_self_id(),
+                            name=f"{sender_name}的后宫",
+                            content=[Comp.Plain("\n".join(chunk))]
+                        )
+                    )
+                if bond_status_list:
+                    bond_lines = [
+                        f"{name}（{owned}/{total}）（+{(ratio - 1) * 100:.0f}%）"
+                        for name, owned, total, ratio, _ in bond_status_list
+                    ]
+                    node_list.append(
+                        Comp.Node(
+                            uin=event.get_self_id(),
+                            name=f"{sender_name}的后宫",
+                            content=[Comp.Plain("\n".join(bond_lines))]
+                        )
+                    )
+                yield event.chain_result([
+                    Comp.Nodes(node_list)
+                ])
+                return
+            total_pages = max(1, (len(entries) + per_page - 1) // per_page)
+            if page < 1:
+                page = 1
+            if page > total_pages:
+                page = total_pages
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            lines.append(f"阵容总人气: {total_heat}")
+            lines.extend(entries[start_idx:end_idx])
+            lines.append(f"(第{page}/{total_pages}页)")
+            chain = [Comp.Reply(id=event.message_obj.message_id)]
             if fav and str(fav) in marry_list:
                 fav_char = self.char_manager.get_character_by_id(fav)
                 if fav_char:
                     images = fav_char.get("image") or []
                     image_url = random.choice(images) if images else None
                     if image_url:
-                        header_parts.insert(0, Comp.Image.fromURL(image_url))
-            node_list = [
-                Comp.Node(
-                    uin=event.get_self_id(),
-                    name=f"{sender_name}的后宫",
-                    content=header_parts
-                )
-            ]
-            for idx in range(0, len(entries), per_page):
-                chunk = entries[idx:idx + per_page]
-                node_list.append(
-                    Comp.Node(
-                        uin=event.get_self_id(),
-                        name=f"{sender_name}的后宫",
-                        content=[Comp.Plain("\n".join(chunk))]
-                    )
-                )
-            yield event.chain_result([
-                Comp.Nodes(node_list)
-            ])
-            return
-        total_pages = max(1, (len(entries) + per_page - 1) // per_page)
-        if page < 1:
-            page = 1
-        if page > total_pages:
-            page = total_pages
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        lines.append(f"阵容总人气: {total_heat}")
-        lines.extend(entries[start_idx:end_idx])
-        lines.append(f"(第{page}/{total_pages}页)")
-        chain = [Comp.Reply(id=event.message_obj.message_id)]
-        if fav and str(fav) in marry_list:
-            fav_char = self.char_manager.get_character_by_id(fav)
-            if fav_char:
-                images = fav_char.get("image") or []
-                image_url = random.choice(images) if images else None
-                if image_url:
-                    chain.append(Comp.Image.fromURL(image_url))
-        chain.append(Comp.Plain("\n".join(lines)))
-        yield event.chain_result(chain)
+                        chain.append(Comp.Image.fromURL(image_url))
+            chain.append(Comp.Plain("\n".join(lines)))
+            yield event.chain_result(chain)
 
     @filter.command("离婚")
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
@@ -741,11 +837,11 @@ class CCB_Plugin(Star):
 
     @filter.command("查询")
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
-    async def handle_query(self, event: AstrMessageEvent, cid: str | int | None = None):
-        '''查询指定角色的信息'''
+    async def handle_query(self, event: AstrMessageEvent, cid: str | int | None = None, iid: str | int | None = None):
+        '''查询指定角色的信息，可选图片序号 iid（1 到 图片数量）'''
         event.call_llm = True
         if cid is None:
-            yield event.plain_result("用法：查询 <角色ID>")
+            yield event.plain_result("用法：查询 <角色ID> [图片序号]")
             return
 
         cid_str = str(cid).strip()
@@ -755,7 +851,7 @@ class CCB_Plugin(Star):
             if not char:
                 yield event.plain_result(f"未找到ID为 {cid_int} 的角色")
                 return
-            async for res in self.print_character_info(event, char):
+            async for res in self.print_character_info(event, char, iid=iid):
                 yield res
                 return
         else:
@@ -763,8 +859,8 @@ class CCB_Plugin(Star):
                 yield res
                 return
 
-    async def print_character_info(self, event: AstrMessageEvent, char: dict):
-        '''打印角色信息'''
+    async def print_character_info(self, event: AstrMessageEvent, char: dict, iid: str | int | None = None):
+        '''打印角色信息，可选 iid 指定图片序号（1 到 len(pool)，无效则随机）'''
         event.call_llm = True
         name = char.get("name", "")
         gender = char.get("gender")
@@ -774,13 +870,35 @@ class CCB_Plugin(Star):
         elif gender == "女":
             gender_mark = "♀"
         heat = char.get("heat")
-        images = char.get("image") or []
-        image_url = random.choice(images) if images else None
         gid = event.get_group_id() or "global"
-        married_to = await self.get_kv_data(f"{gid}:{char.get('id')}:married_to", None)
-        chain = [Comp.Plain(f"ID: {char.get('id')}\n{name}\n{gender_mark}\n热度: {heat}")]
+        char_id = char.get("id")
+        images = char.get("image") or []
+        custom_paths = await self.get_kv_data(f"{gid}:{char_id}:custom_images", []) if char_id is not None else []
+        custom_full = [os.path.join(self.plugin_data_path, p) for p in custom_paths]
+        pool = images + custom_full
+        if pool and iid is not None and str(iid).strip().isdigit():
+            idx = int(str(iid).strip())
+            if 1 <= idx <= len(pool):
+                image_url = pool[idx - 1]
+            else:
+                image_url = random.choice(pool)
+        else:
+            image_url = random.choice(pool) if pool else None
+        married_to = await self.get_kv_data(f"{gid}:{char_id}:married_to", None)
+        wished_by = await self.get_kv_data(f"{gid}:{char_id}:wished_by", [])
+        base_heat = float(heat) if heat is not None else 0
+        effective_heat = base_heat * (1.1 ** len(wished_by))
+        heat_int = int(round(effective_heat))
+        heat_display = str(heat_int)
+        if len(wished_by) and base_heat > 0:
+            pct_increase = (effective_heat - base_heat) / base_heat * 100
+            heat_display += f"（+{pct_increase:.1f}%）"
+        chain = [Comp.Plain(f"ID: {char_id}\n{name}\n{gender_mark}\n热度：{heat_display}")]
         if image_url:
-            chain.append(Comp.Image.fromURL(image_url))
+            if image_url.startswith("http://") or image_url.startswith("https://"):
+                chain.append(Comp.Image.fromURL(image_url))
+            else:
+                chain.append(Comp.Image.fromFileSystem(image_url))
         if married_to:
             chain.append(Comp.Plain("❤已与 "))
             chain.append(Comp.At(qq=married_to))
@@ -811,6 +929,98 @@ class CCB_Plugin(Star):
             lines = [f"{c.get('name')} (ID: {c.get('id')})" for c in top]
             more = "" if len(matches) <= len(top) else f"\n..."
             yield event.plain_result("\n".join(lines) + more)
+
+    @filter.command("添加图片")
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def handle_add_image(self, event: AstrMessageEvent, cid: str | int | None = None):
+        '''添加图片'''
+        event.call_llm = True
+        gid = event.get_group_id() or "global"
+        user_id = str(event.get_sender_id())
+        if cid is None or not str(cid).strip().isdigit():
+            yield event.plain_result("用法：添加图片 <角色ID>")
+            return
+        cid = int(str(cid).strip())
+        lock = self._get_group_lock(gid)
+        async with lock:
+            partners_key = f"{gid}:{user_id}:partners"
+            partners = await self.get_kv_data(partners_key, [])
+            if str(cid) not in partners:
+                yield event.plain_result("角色不在后宫中")
+                return
+            # Parse image: either from Reply.chain (reply to image) or direct Image in message
+            # Only accept Image type (ComponentType.Image), not Video or other segments
+            message = event.message_obj.message or []
+            images = []
+            for part in message:
+                if getattr(part, "chain", None):
+                    for sub in part.chain:
+                        if isinstance(sub, Comp.Image):
+                            images.append({"file_name": sub.file, "url": sub.url})
+                elif isinstance(part, Comp.Image):
+                    images.append({"file_name": part.file, "url": part.url})
+            if not images:
+                yield event.plain_result("图片在哪呢我请问了")
+                return
+            custom_images_key = f"{gid}:{cid}:custom_images"
+            paths = await self.get_kv_data(custom_images_key, [])
+            if len(paths) >= self.custom_images_limit_default:
+                yield event.plain_result(f"已经有{self.custom_images_limit_default}张了，别加了")
+                return
+            if len(paths) + len(images) > self.custom_images_limit_default:
+                yield event.plain_result(f"图片太多了")
+                return
+            logger.info("cid: %s", cid)
+            img_dir = f"{self.plugin_data_path.rstrip('/')}/img"
+            os.makedirs(img_dir, exist_ok=True)
+            async with aiohttp.ClientSession() as session:
+                for img in images:
+                    short_name = img["file_name"][-15:]
+                    save_name = f"{gid}_{cid}_{short_name}"
+                    save_path = os.path.join(img_dir, save_name)
+                    try:
+                        async with session.get(img["url"]) as resp:
+                            resp.raise_for_status()
+                            data = await resp.read()
+                        with open(save_path, "wb") as f:
+                            f.write(data)
+                        paths.append(f"img/{save_name}")
+                        await self.put_kv_data(custom_images_key, paths)
+                    except Exception as e:
+                        logger.error("add_image save failed: %s", e)
+            yield event.chain_result([
+                Comp.Reply(id=str(event.message_obj.message_id)),
+                Comp.Plain(f"添加成功，当前自定义图片数量：{len(paths)}"),
+            ])
+
+    @filter.command("清除图片")
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def handle_clear_image(self, event: AstrMessageEvent, cid: str | int | None = None):
+        '''清除指定角色的自定义图片'''
+        event.call_llm = True
+        gid = event.get_group_id() or "global"
+        user_id = str(event.get_sender_id())
+        if cid is None or not str(cid).strip().isdigit():
+            yield event.plain_result("用法：清除图片 <角色ID>")
+            return
+        cid = int(str(cid).strip())
+        married_to = await self.get_kv_data(f"{gid}:{cid}:married_to", None)
+        group_role = await self.get_group_role(event)
+        if str(married_to) != user_id and group_role not in ['admin', 'owner'] and str(event.get_sender_id()) not in self.super_admins:
+            yield event.plain_result("无权限：结婚用户或群管理员可清除该角色自定义图片")
+            return
+        custom_images_key = f"{gid}:{cid}:custom_images"
+        paths = await self.get_kv_data(custom_images_key, [])
+        if not paths:
+            yield event.plain_result("没有自定义图片")
+            return
+        for path in paths:
+            os.remove(os.path.join(self.plugin_data_path, path))
+        await self.delete_kv_data(custom_images_key)
+        yield event.chain_result([
+            Comp.Reply(id=str(event.message_obj.message_id)),
+            Comp.Plain(f"已清除该角色的自定义图片"),
+        ])
 
     @filter.command("强制离婚")
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
@@ -899,6 +1109,8 @@ class CCB_Plugin(Star):
             f"———后宫人数上限 | 当前值: {config.get('harem_max_size', self.harem_max_size_default)}",
             "系统设置 抽卡范围 [5000~20000]",
             f"———抽卡热度范围 | 当前值: {config.get('draw_scope', '无')}",
+            "系统设置 牛头人 [0~100]",
+            f"———牛头人概率 | 当前值: {config.get('ntr_chance', 0)}"
         ]
         if feature is None:
             yield event.chain_result([Comp.Plain("\n".join(menu_lines))])
@@ -954,6 +1166,17 @@ class CCB_Plugin(Star):
             config["draw_scope"] = scope
             await self.put_group_cfg(event.get_group_id(), config)
             yield event.plain_result(f"抽卡范围已设置为热度前{scope}")
+        elif feature == "牛头人":
+            if value is None or not str(value).strip().isdigit():
+                yield event.plain_result("用法：牛头人 [0~100]")
+                return
+            value = int(str(value).strip())
+            if value < 0 or value > 100:
+                yield event.plain_result("用法：牛头人 [0~100]")
+                return
+            config["ntr_chance"] = value
+            await self.put_group_cfg(event.get_group_id(), config)
+            yield event.plain_result(f"现在抽到别人对象有{value}%概率可牛")
         else:
             yield event.chain_result([Comp.Plain("\n".join(menu_lines))]) 
 
@@ -978,6 +1201,25 @@ class CCB_Plugin(Star):
         await self.delete_kv_data(f"{gid}:{user_id}:last_claim")
         yield event.plain_result("次数已重置，结婚冷却已清除")
 
+    @filter.command("群排行")
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def handle_group_rank(self, event: AstrMessageEvent):
+        '''显示群排名'''
+        event.call_llm = True
+        gid = event.get_group_id() or "global"
+        harem_heats_key = f"{gid}_harem_heats"
+        harem_heats = await self.get_kv_data(harem_heats_key, {}) or {}
+        if not harem_heats:
+            yield event.plain_result("暂无排名数据")
+            return
+        sorted_heats = sorted(harem_heats.items(), key=lambda x: x[1], reverse=True)
+        rank_lines = []
+        for i, (uid, heat) in enumerate(sorted_heats):
+            user_info = await event.bot.api.call_action("get_group_member_info", group_id=gid, user_id=uid)
+            name = user_info.get("card") or user_info.get("nickname") or uid
+            rank_lines.append(f"{i+1}. {name}：{heat}")
+        yield event.plain_result("\n".join(rank_lines))
+
     @filter.command("终极轮回")
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def handle_ultimate_reset(self, event: AstrMessageEvent, confirm: str | None = None):
@@ -994,6 +1236,8 @@ class CCB_Plugin(Star):
         lock = self._get_group_lock(gid)
         async with lock:
             users = await self.get_kv_data(f"{gid}:user_list", [])
+            harem_heats_key = f"{gid}_harem_heats"
+            await self.delete_kv_data(harem_heats_key)
             for uid in users:
                 fav = await self.get_kv_data(f"{gid}:{uid}:fav", None)
                 marry_list = await self.get_kv_data(f"{gid}:{uid}:partners", [])
