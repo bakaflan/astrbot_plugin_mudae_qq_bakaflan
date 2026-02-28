@@ -204,7 +204,7 @@ class CCB_Plugin(Star):
             next_count = count + 1
             remaining = limit - next_count
             wish_list = await self.get_kv_data(f"{gid}:{user_id}:wish_list", [])
-            if random.random() < 0.001 and wish_list:
+            if random.random() < 0.003 and wish_list:
                 char_id = random.choice(wish_list)
                 character = self.char_manager.get_character_by_id(char_id)
             else:
@@ -349,11 +349,14 @@ class CCB_Plugin(Star):
             if claimed_by:
                 prev_fav = await self.get_kv_data(f"{gid}:{claimed_by}:fav", None)
                 if prev_fav is not None and str(prev_fav) == str(char_id):
-                    yield event.chain_result([
-                        Comp.At(qq=user_id),
-                        Comp.Plain("\u200b\n失败了！该角色是对方的最爱")
-                    ])
-                    return
+                    if random.random() < 0.7:
+                        yield event.chain_result([
+                            Comp.At(qq=user_id),
+                            Comp.Plain("\u200b\n失败了！该角色是对方的最爱")
+                        ])
+                        return
+                    else:
+                        await self.delete_kv_data(f"{gid}:{claimed_by}:fav")
                 # NTR: Delete old relationship, create new (marry_list already fetched and size-checked)
                 prev_marry_key = f"{gid}:{claimed_by}:partners"
                 prev_marry_list = await self.get_kv_data(prev_marry_key, [])
@@ -417,6 +420,10 @@ class CCB_Plugin(Star):
                     Comp.At(qq=uid),
                     Comp.Plain("，你的后宫空空如也。")
                 ])
+                harem_heats_key = f"{gid}_harem_heats"
+                harem_heats = await self.get_kv_data(harem_heats_key, {}) or {}
+                del harem_heats[uid]
+                await self.put_kv_data(harem_heats_key, harem_heats)
                 return
             lines = []
             per_page = 10
