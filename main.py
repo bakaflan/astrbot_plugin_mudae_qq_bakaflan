@@ -900,7 +900,11 @@ class CCB_Plugin(Star):
         if len(wished_by) and base_heat > 0:
             pct_increase = (effective_heat - base_heat) / base_heat * 100
             heat_display += f"（+{pct_increase:.1f}%）"
-        chain = [Comp.Plain(f"ID: {char_id}\n{name}\n{gender_mark}\n热度：{heat_display}")]
+        bonds = self.char_manager.get_bonds_for_character(char_id) if char_id is not None else []
+        header = f"ID: {char_id}\n{name}\n{gender_mark}\n热度：{heat_display}"
+        if bonds:
+            header += f"\n羁绊：{', '.join(bonds)}"
+        chain = [Comp.Plain(header)]
         if image_url:
             if image_url.startswith("http://") or image_url.startswith("https://"):
                 chain.append(Comp.Image.fromURL(image_url))
