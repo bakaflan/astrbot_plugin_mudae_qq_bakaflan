@@ -422,7 +422,8 @@ class CCB_Plugin(Star):
                 ])
                 harem_heats_key = f"{gid}_harem_heats"
                 harem_heats = await self.get_kv_data(harem_heats_key, {}) or {}
-                del harem_heats[uid]
+                if uid in harem_heats:
+                    del harem_heats[uid]
                 await self.put_kv_data(harem_heats_key, harem_heats)
                 return
             lines = []
