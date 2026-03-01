@@ -228,7 +228,7 @@ class CCB_Plugin(Star):
             wished_by = await self.get_kv_data(wished_by_key, [])
             
             cq_message = []
-            ntr_chance = config.get("ntr_chance", 0)
+            ntr_chance = config.get("ntr_chance", 10)
             if married_to is not None and random.random() < ntr_chance*(1+len(wished_by)) / 100:
                 allow_ntr = True
             else:
@@ -1224,11 +1224,14 @@ class CCB_Plugin(Star):
         if not harem_heats:
             yield event.plain_result("暂无排名数据")
             return
-        sorted_heats = sorted(harem_heats.items(), key=lambda x: x[1], reverse=True)
+        sorted_heats = sorted(harem_heats.items(), key=lambda x: x[1], reverse=True)[:10]
         rank_lines = []
         for i, (uid, heat) in enumerate(sorted_heats):
-            user_info = await event.bot.api.call_action("get_group_member_info", group_id=gid, user_id=uid)
-            name = user_info.get("card") or user_info.get("nickname") or uid
+            try:
+                user_info = await event.bot.api.call_action("get_group_member_info", group_id=gid, user_id=uid)
+                name = user_info.get("card") or user_info.get("nickname") or uid
+            except:
+                name = f"({uid})"
             rank_lines.append(f"{i+1}. {name}：{heat}")
         yield event.plain_result("\n".join(rank_lines))
 
