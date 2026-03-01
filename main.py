@@ -1122,7 +1122,7 @@ class CCB_Plugin(Star):
             "系统设置 抽卡范围 [5000~20000]",
             f"———抽卡热度范围 | 当前值: {config.get('draw_scope', '无')}",
             "系统设置 牛头人 [0~100]",
-            f"———牛头人概率 | 当前值: {config.get('ntr_chance', 0)}"
+            f"———牛头人概率 | 当前值: {config.get('ntr_chance', 10)}"
         ]
         if feature is None:
             yield event.chain_result([Comp.Plain("\n".join(menu_lines))])
