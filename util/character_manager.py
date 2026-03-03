@@ -2,6 +2,28 @@ import json
 import random
 from pathlib import Path
 
+RATIO_TABLE: dict[int, list[float]] = {
+    2:  [1, 1.6],
+    3:  [1, 1.3, 1.8],
+    4:  [1, 1.2, 1.5, 2],
+    5:  [1, 1, 1.4, 1.9, 3],
+    6:  [1, 1, 1.3, 1.7, 2.2, 4.5],
+    7:  [1, 1, 1.2, 1.5, 2.2, 3.0, 7],
+    8:  [1, 1, 1, 1.4, 1.9, 2.8, 5.2, 10],
+    9:  [1, 1, 1, 1.3, 1.7, 2.4, 3.8, 7.8, 13],
+    10: [1, 1, 1, 1.2, 1.5, 2.1, 3.0, 5.5, 10.5, 16],
+    11: [1, 1, 1, 1, 1.4, 1.9, 2.8, 5.2, 10.5, 16.5, 22],
+    12: [1, 1, 1, 1, 1.3, 1.7, 2.4, 3.8, 7.8, 13.5, 22.5, 30],
+    13: [1, 1, 1, 1, 1.2, 1.5, 2.1, 3.0, 5.5, 10.5, 16.5, 22.5, 30],
+    14: [1, 1, 1, 1, 1, 1.4, 1.9, 2.8, 5.2, 10.5, 16.5, 22.5, 30, 40],
+    15: [1, 1, 1, 1, 1, 1.3, 1.7, 2.4, 3.8, 7.8, 13.5, 22.5, 30, 40, 50],
+    16: [1, 1, 1, 1, 1, 1.2, 1.5, 2.1, 3.0, 5.5, 10.5, 16.5, 22.5, 30, 40, 50, 60],
+    17: [1, 1, 1, 1, 1, 1, 1.4, 1.9, 2.8, 5.2, 10.5, 16.5, 22.5, 30, 40, 50, 60, 70],
+    18: [1, 1, 1, 1, 1, 1, 1.3, 1.7, 2.4, 3.8, 7.8, 13.5, 22.5, 30, 40, 50, 60, 70, 80],
+    19: [1, 1, 1, 1, 1, 1, 1.2, 1.5, 2.1, 3.0, 5.5, 10.5, 16.5, 22.5, 30, 40, 50, 60, 70, 80, 90],
+}
+
+
 class CharacterManager:
     """Encapsulates cached character data to avoid module-level globals."""
 
@@ -10,7 +32,6 @@ class CharacterManager:
         self._id_index: dict[int, dict] | None = None
         self._bonds: dict[str, list[int]] | None = None
         self._char_to_bonds: dict[int, list[str]] | None = None
-        self._bond_boost_ratios: dict[str, list[float]] | None = None
 
     def load_characters(self) -> list[dict]:
         """Load pre-sorted character pool from file once."""
@@ -38,11 +59,8 @@ class CharacterManager:
         with data_path.open("r", encoding="utf-8") as f:
             raw = json.load(f)
         self._bonds = {}
-        self._bond_boost_ratios = {}
-        for name, obj in raw.items():
-            ids = obj.get("ids", [])
-            self._bonds[name] = [int(x) for x in ids]
-            self._bond_boost_ratios[name] = obj.get("boost_ratio", [1])
+        for name, ids in raw.items():
+            self._bonds[name] = [int(x) for x in (ids if isinstance(ids, list) else [])]
         self._char_to_bonds = {}
         for bond_name, ids in self._bonds.items():
             for cid in ids:
@@ -57,11 +75,14 @@ class CharacterManager:
         return self._char_to_bonds.get(int(character_id), [])
 
     def get_boost_ratio(self, bond_name: str, owned_count: int) -> float:
-        """Return boost ratio for a bond at given owned count. boost_ratio[i] is the ratio for i+1 owned (1st→index 0, 2nd→index 1, ...)."""
+        """Return boost ratio for a bond at given owned count. Uses RATIO_TABLE keyed by bond size (3–10)."""
         self.load_bonds()
-        ratios = (self._bond_boost_ratios or {}).get(bond_name, [1])
-        if not ratios:
+        member_ids = (self._bonds or {}).get(bond_name, [])
+        size = len(member_ids)
+        if size == 0:
             return 1.0
+        size = max(3, min(10, size))
+        ratios = RATIO_TABLE[size]
         idx = min(max(0, owned_count - 1), len(ratios) - 1)
         return float(ratios[idx])
 

@@ -38,7 +38,7 @@ class CCB_Plugin(Star):
             raise RuntimeError("无法加载角色数据：characters.json 缺失或格式错误")
         bonds = self.char_manager.load_bonds()
         if not bonds:
-            raise RuntimeError("无法加载羁绊数据：bonds.json 缺失或格式错误")
+            raise RuntimeError("无法加载收藏数据：bonds.json 缺失或格式错误")
 
     async def get_group_cfg(self, gid):
         if gid not in self.group_cfgs:
@@ -136,6 +136,7 @@ class CCB_Plugin(Star):
             "普通指令：",
             "菜单/帮助",
             "抽卡/ck",
+            "结婚（必须回复抽卡结果）",
             "离婚 <角色ID>",
             "最爱 <角色ID>",
             "查询 <角色ID> [图片序号]",
@@ -293,12 +294,13 @@ class CCB_Plugin(Star):
             except Exception as e:
                 logger.error({"stage": "draw_send_error_bot", "error": repr(e)})
 
-    async def handle_claim(self, event: AstrMessageEvent):
-        '''结婚逻辑，给结果贴表情来收集。'''
+    async def handle_claim(self, event: AstrMessageEvent, msg_id: str | int | None = None):
+        '''结婚逻辑，给结果贴表情来收集。msg_id 可选，不传则从 event 取（表情触发时）；传则用做回复结婚时的抽卡消息 id。'''
         event.call_llm = True
         gid = event.get_group_id() or "global"
         user_id = event.get_sender_id()
-        msg_id = event.message_obj.raw_message.message_id
+        if msg_id is None:
+            msg_id = event.message_obj.raw_message.message_id
         # per-user cooldown
         config = await self.get_group_cfg(gid)
         cooldown = config.get("claim_cooldown", self.claim_cooldown_default)
@@ -402,6 +404,25 @@ class CCB_Plugin(Star):
                     Comp.At(qq=user_id),
                     Comp.Plain(f" 的{title}了！🎉")
                 ])
+
+    @filter.command("结婚")
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    async def handle_marry(self, event: AstrMessageEvent):
+        '''收集角色（回复抽卡消息时等同于贴表情结婚）'''
+        event.call_llm = True
+        replied_msg_id = None
+        for part in (event.message_obj.message or []):
+            if isinstance(part, Comp.Reply) and getattr(part, "id", None):
+                replied_msg_id = str(part.id)
+                break
+        if not replied_msg_id:
+            return
+        gid = event.get_group_id() or "global"
+        draw_msg = await self.get_kv_data(f"{gid}:draw_msg:{replied_msg_id}", None)
+        if not draw_msg:
+            return
+        async for res in self.handle_claim(event, msg_id=replied_msg_id):
+            yield res
 
     @filter.command("我的后宫")
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
@@ -904,7 +925,7 @@ class CCB_Plugin(Star):
         bonds = self.char_manager.get_bonds_for_character(char_id) if char_id is not None else []
         header = f"ID: {char_id}\n{name}\n{gender_mark}\n热度：{heat_display}"
         if bonds:
-            header += f"\n羁绊：{', '.join(bonds)}"
+            header += f"\n收藏：{' | '.join(bonds)}"
         chain = [Comp.Plain(header)]
         if image_url:
             if image_url.startswith("http://") or image_url.startswith("https://"):
