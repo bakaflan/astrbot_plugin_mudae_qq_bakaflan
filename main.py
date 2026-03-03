@@ -74,10 +74,10 @@ class CCB_Plugin(Star):
         return lock
 
     @filter.platform_adapter_type(PlatformAdapterType.AIOCQHTTP)
-    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    # @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def handle_group_notice(self, event: AstrMessageEvent):
         '''用户回应抽卡结果和交换请求的处理器'''
-        logger.info(f"handle_group_notice: {event.message_obj}")
+        logger.info(f"handle_group_notice: {event}")
         gid = event.get_group_id()
         if not gid:
             return  # commands are group-only
