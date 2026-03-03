@@ -89,7 +89,7 @@ class CCB_Plugin(Star):
             await self.put_user_list(gid, user_set)
 
         # 检查是否为notice事件：event.message_obj.raw_message.post_type == "notice"
-        if event.message_obj.raw_message.post_type == "notice":
+        if event.message_obj.raw_message.get("post_type") == "notice":
             # 检查是否为emoji事件：event.message_obj.raw_message.notice_type == "group_msg_emoji_like"
             if event.message_obj.raw_message.notice_type == "group_msg_emoji_like":
                 # stop further pipeline (including default LLM) for notice events
