@@ -77,6 +77,7 @@ class CCB_Plugin(Star):
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def handle_group_notice(self, event: AstrMessageEvent):
         '''用户回应抽卡结果和交换请求的处理器'''
+        logger.info(f"handle_group_notice: {event.message_obj}")
         gid = event.get_group_id()
         if not gid:
             return  # commands are group-only
@@ -87,8 +88,6 @@ class CCB_Plugin(Star):
         if uid not in user_set:
             user_set.add(uid)
             await self.put_user_list(gid, user_set)
-
-        logger.info(f"handle_group_notice: {event.message_obj.raw_message}")
 
         # 检查是否为notice事件：event.message_obj.raw_message.post_type == "notice"
         if event.message_obj.raw_message.get("post_type") == "notice":
