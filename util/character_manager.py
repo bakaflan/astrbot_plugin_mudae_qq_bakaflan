@@ -124,12 +124,16 @@ class CharacterManager:
             return None
 
     def search_characters_by_name(self, keyword: str) -> list[dict]:
-        """Return characters whose name contains the keyword (case-insensitive)."""
+        """Return characters whose name or alias contains the keyword (case-insensitive)."""
         if not keyword:
             return []
         key_lower = str(keyword).lower()
         chars = self.load_characters()
         if not chars:
             return []
-        return [c for c in chars if key_lower in str(c.get("name", "")).lower()]
+        def matches(c: dict) -> bool:
+            name = str(c.get("name", "")).lower()
+            alias = str(c.get("alias", "")).lower()
+            return key_lower in name or key_lower in alias
+        return [c for c in chars if matches(c)]
 
