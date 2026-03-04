@@ -1048,7 +1048,11 @@ class CCB_Plugin(Star):
             yield event.plain_result("没有自定义图片")
             return
         for path in paths:
-            os.remove(os.path.join(self.plugin_data_path, path))
+            full_path = os.path.join(self.plugin_data_path, path)
+            try:
+                os.remove(full_path)
+            except:
+                pass
         await self.delete_kv_data(custom_images_key)
         yield event.chain_result([
             Comp.Reply(id=str(event.message_obj.message_id)),
