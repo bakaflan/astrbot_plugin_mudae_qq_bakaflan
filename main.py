@@ -933,9 +933,9 @@ class CCB_Plugin(Star):
                 chain.append(Comp.Image.fromURL(image_url))
             else:
                 chain.append(Comp.Image.fromFileSystem(image_url))
-            chain.append(Comp.Plain(f"\n({iid}/{len(pool)})\n\u200b"))
+            chain.append(Comp.Plain(f"\n({iid}/{len(pool)})"))
         if married_to:
-            chain.append(Comp.Plain("❤已与 "))
+            chain.append(Comp.Plain("\u200b\n❤已与 "))
             chain.append(Comp.At(qq=married_to))
             chain.append(Comp.Plain("结婚❤"))
         yield event.chain_result(chain)
