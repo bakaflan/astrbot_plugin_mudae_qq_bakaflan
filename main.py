@@ -905,14 +905,15 @@ class CCB_Plugin(Star):
         custom_paths = await self.get_kv_data(f"{gid}:{char_id}:custom_images", []) if char_id is not None else []
         custom_full = [os.path.join(self.plugin_data_path, p) for p in custom_paths]
         pool = images + custom_full
-        if pool and iid is not None and str(iid).strip().isdigit():
-            idx = int(str(iid).strip())
-            if 1 <= idx <= len(pool):
-                image_url = pool[idx - 1]
+        image_url = None
+        if pool:
+            if iid is None or not str(iid).strip().isdigit():
+                iid = random.randint(1, len(pool))
             else:
-                image_url = random.choice(pool)
-        else:
-            image_url = random.choice(pool) if pool else None
+                iid = int(str(iid).strip())
+                if iid < 1 or iid > len(pool):
+                    iid = random.randint(1, len(pool))
+            image_url = pool[iid - 1]
         married_to = await self.get_kv_data(f"{gid}:{char_id}:married_to", None)
         wished_by = await self.get_kv_data(f"{gid}:{char_id}:wished_by", [])
         base_heat = float(heat) if heat is not None else 0
@@ -932,6 +933,7 @@ class CCB_Plugin(Star):
                 chain.append(Comp.Image.fromURL(image_url))
             else:
                 chain.append(Comp.Image.fromFileSystem(image_url))
+            chain.append(Comp.Plain(f"\n({iid}/{len(pool)})\n\u200b"))
         if married_to:
             chain.append(Comp.Plain("❤已与 "))
             chain.append(Comp.At(qq=married_to))
