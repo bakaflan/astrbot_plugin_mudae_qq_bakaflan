@@ -89,12 +89,17 @@ class CCB_Plugin(Star):
             await self.put_user_list(gid, user_set)
 
         # 检查是否为notice事件：event.message_obj.raw_message.post_type == "notice"
-        if event.message_obj.raw_message.get("post_type") == "notice":
-            # 检查是否为emoji事件：event.message_obj.raw_message.notice_type == "group_msg_emoji_like"
-            if event.message_obj.raw_message.notice_type == "group_msg_emoji_like":
-                # stop further pipeline (including default LLM) for notice events
-                async for result in self.handle_emoji_like_notice(event):
-                    yield result
+        if (
+            event 
+            and getattr(event, "message_obj", None)
+            and getattr(event.message_obj, "raw_message", None)
+            and getattr(event.message_obj.raw_message, "post_type", None) == "notice"
+            and getattr(event.message_obj.raw_message, "notice_type", None) == "group_msg_emoji_like"
+        ):
+            # stop further pipeline (including default LLM) for notice events
+            async for result in self.handle_emoji_like_notice(event):
+                yield result
+            return
 
     async def handle_emoji_like_notice(self, event: AstrMessageEvent):
         '''用户回应抽卡结果和交换请求的处理器'''

@@ -10,6 +10,10 @@ NapCat和AstrBot的部署请参考 [https://docs.astrbot.app/deploy/platform/aio
 
 请在“插件-插件配置”中浏览并编辑默认游戏参数。
 
+## BUG反馈&功能建议
+
+欢迎提交issue，也可以加反馈群1087179743。带上你的机器人。
+
 ## 基本指令
 
 **查看帮助**
