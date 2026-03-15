@@ -1149,7 +1149,7 @@ class CCB_Plugin(Star):
             f"———抽卡冷却（秒） | 当前值: {config.get('draw_cooldown', 0)}",
             "系统设置 抽卡次数 [1~10]",
             f"———每小时抽卡次数 | 当前值: {config.get('draw_hourly_limit', self.draw_hourly_limit_default)}",
-            "系统设置 后宫上限 [5~30]",
+            "系统设置 后宫上限 [5~50]",
             f"———后宫人数上限 | 当前值: {config.get('harem_max_size', self.harem_max_size_default)}",
             "系统设置 抽卡范围 [5000~20000]",
             f"———抽卡热度范围 | 当前值: {config.get('draw_scope', '无')}",
