@@ -879,7 +879,7 @@ class CCB_Plugin(Star):
         if query_cooldown > 0:
             last_query_ts = await self.get_kv_data(f"{gid}:last_query", 0)
             if (time.time() - last_query_ts) < query_cooldown:
-                yield event.plain_result(f"查询冷却中，请等待{query_cooldown}秒后重试")
+                yield event.plain_result(f"查询冷却中，请等待{round(query_cooldown-(time.time()-last_query_ts),1)}秒后重试")
                 return
         await self.put_kv_data(f"{gid}:last_query", time.time())
         event.call_llm = True
