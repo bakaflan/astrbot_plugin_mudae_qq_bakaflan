@@ -873,6 +873,15 @@ class CCB_Plugin(Star):
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def handle_query(self, event: AstrMessageEvent, cid: str | int | None = None, iid: str | int | None = None):
         '''查询指定角色的信息，可选图片序号 iid（1 到 图片数量）'''
+        gid = event.get_group_id() or "global"
+        config = await self.get_group_cfg(gid)
+        query_cooldown = config.get("query_cooldown", 0)
+        if query_cooldown > 0:
+            last_query_ts = await self.get_kv_data(f"{gid}:last_query", 0)
+            if (time.time() - last_query_ts) < query_cooldown:
+                yield event.plain_result(f"查询冷却中，请等待{query_cooldown}秒后重试")
+                return
+        await self.put_kv_data(f"{gid}:last_query", time.time())
         event.call_llm = True
         if cid is None:
             yield event.plain_result("用法：查询 <角色ID> [图片序号]")
@@ -1145,8 +1154,10 @@ class CCB_Plugin(Star):
         config = await self.get_group_cfg(event.get_group_id())
         menu_lines = [
             "用法：",
-            f"系统设置 抽卡冷却 [0~600]",
+            "系统设置 抽卡冷却 [0~60]",
             f"———抽卡冷却（秒） | 当前值: {config.get('draw_cooldown', 0)}",
+            "系统设置 查询冷却 [0~60]",
+            f"———查询冷却（秒） | 当前值: {config.get('query_cooldown', 0)}",
             "系统设置 抽卡次数 [1~10]",
             f"———每小时抽卡次数 | 当前值: {config.get('draw_hourly_limit', self.draw_hourly_limit_default)}",
             "系统设置 后宫上限 [5~50]",
@@ -1167,12 +1178,25 @@ class CCB_Plugin(Star):
             time = int(str(value).strip())
             if time < 0:
                 time = 0
-            if time > 600:
-                yield event.plain_result("时间不能超过600秒")
+            if time > 60:
+                yield event.plain_result("时间不能超过60秒")
                 return
             config["draw_cooldown"] = time
             await self.put_group_cfg(event.get_group_id(), config)
             yield event.plain_result(f"抽卡冷却已设置为{time}秒")
+        elif feature == "查询冷却":
+            if value is None or not str(value).strip().isdigit():
+                yield event.plain_result("用法：查询冷却 [0~60](秒)")
+                return
+            time = int(str(value).strip())
+            if time < 0:
+                time = 0
+            if time > 60:
+                yield event.plain_result("时间不能超过60秒")
+                return
+            config["query_cooldown"] = time
+            await self.put_group_cfg(event.get_group_id(), config)
+            yield event.plain_result(f"查询冷却已设置为{time}秒")
         elif feature == "抽卡次数":
             if value is None or not str(value).strip().isdigit():
                 yield event.plain_result("用法：抽卡次数 [1~10]")
