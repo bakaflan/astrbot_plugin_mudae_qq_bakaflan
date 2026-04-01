@@ -1162,7 +1162,7 @@ class CCB_Plugin(Star):
             f"———每小时抽卡次数 | 当前值: {config.get('draw_hourly_limit', self.draw_hourly_limit_default)}",
             "系统设置 后宫上限 [5~50]",
             f"———后宫人数上限 | 当前值: {config.get('harem_max_size', self.harem_max_size_default)}",
-            "系统设置 抽卡范围 [5000~20000]",
+            "系统设置 抽卡范围 [>5000]",
             f"———抽卡热度范围 | 当前值: {config.get('draw_scope', '无')}",
             "系统设置 牛头人 [0~100]",
             f"———牛头人概率 | 当前值: {config.get('ntr_chance', 10)}"
@@ -1224,13 +1224,11 @@ class CCB_Plugin(Star):
             yield event.plain_result(f"后宫上限已设置为{count}")
         elif feature == "抽卡范围":
             if value is None or not str(value).strip().isdigit():
-                yield event.plain_result("用法：抽卡范围 [>3000]")
+                yield event.plain_result("用法：抽卡范围 [>5000]")
                 return
             scope = int(str(value).strip())
             if scope < 5000:
                 scope = 5000
-            elif scope > 20000:
-                scope = 20000
             config["draw_scope"] = scope
             await self.put_group_cfg(event.get_group_id(), config)
             yield event.plain_result(f"抽卡范围已设置为热度前{scope}")
