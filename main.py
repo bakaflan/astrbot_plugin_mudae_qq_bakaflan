@@ -710,7 +710,7 @@ class CCB_Plugin(Star):
             to_list = await self.get_kv_data(to_list_key, [])
 
             if from_cid not in from_list or to_cid not in to_list:
-                logger.info({"stage": "exchange_fail_missing_role", "msg_id": msg_id})
+                # logger.info({"stage": "exchange_fail_missing_role", "msg_id": msg_id})
                 yield event.plain_result("交换失败：有人没有对应角色。")
                 return
 
@@ -723,14 +723,14 @@ class CCB_Plugin(Star):
 
             await self.put_kv_data(to_claim_key, from_uid)
             await self.put_kv_data(from_claim_key, to_uid)
-            logger.info({
-                "stage": "exchange_success",
-                "msg_id": msg_id,
-                "from_uid": from_uid,
-                "to_uid": to_uid,
-                "from_cid": from_cid,
-                "to_cid": to_cid,
-            })
+            # logger.info({
+            #     "stage": "exchange_success",
+            #     "msg_id": msg_id,
+            #     "from_uid": from_uid,
+            #     "to_uid": to_uid,
+            #     "from_cid": from_cid,
+            #     "to_cid": to_cid,
+            # })
 
             from_cname = self.char_manager.get_character_by_id(from_cid).get("name") or str(from_cid)
             to_cname = self.char_manager.get_character_by_id(to_cid).get("name") or str(to_cid)
@@ -949,9 +949,12 @@ class CCB_Plugin(Star):
                 chain.append(Comp.Image.fromFileSystem(image_url))
             chain.append(Comp.Plain(f"\n({iid}/{len(pool)})"))
         if married_to:
-            chain.append(Comp.Plain("\u200b\n❤已与 "))
-            chain.append(Comp.At(qq=married_to))
-            chain.append(Comp.Plain("结婚❤"))
+            try:
+                user_info = await event.bot.api.call_action("get_group_member_info", group_id=gid, user_id=married_to)
+                name = user_info.get("card") or user_info.get("nickname") or married_to
+            except:
+                name = f"({married_to})"
+            chain.append(Comp.Plain(f"\u200b\n❤已与 {name} 结婚❤"))
         yield event.chain_result(chain)
 
     @filter.command("搜索")
