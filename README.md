@@ -12,7 +12,7 @@ NapCat和AstrBot的部署请参考 [https://docs.astrbot.app/deploy/platform/aio
 
 ## BUG反馈&功能建议
 
-欢迎提交issue，也可以加反馈群1087179743。带上你的机器人。
+欢迎提交issue，也可以加反馈群894333602。带上你的机器人。
 
 ## 基本指令
 
