@@ -10,6 +10,8 @@ import aiohttp
 from .util.character_manager import CharacterManager
 import random
 import asyncio
+import datetime
+import re
 
 DRAW_MSG_TTL = 45  # seconds to keep draw message records
 DRAW_MSG_INDEX_MAX = 300  # max tracked message ids to avoid unbounded growth
@@ -158,6 +160,7 @@ class CCB_Plugin(Star):
             "================================",
             "管理员指令：",
             "系统设置 <功能> <参数>",
+            "系统设置 可抽卡时间范围 HH:mm-HH:mm",
             "清理后宫 <QQ号>",
             "强制离婚 <角色ID>",
             "================================",
@@ -181,6 +184,27 @@ class CCB_Plugin(Star):
             key = f"{gid}:{user_id}:draw_status"
             now_ts = time.time()
             config = await self.get_group_cfg(gid)
+            
+            time_range = config.get("draw_time_range")
+            if time_range:                
+                tz = datetime.timezone(datetime.timedelta(hours=8))
+                now = datetime.datetime.now(tz)
+                current_minutes = now.hour * 60 + now.minute
+                start_time, end_time = time_range.split('-')
+                start_hour, start_min = map(int, start_time.split(':'))
+                end_hour, end_min = map(int, end_time.split(':'))
+                start_minutes = start_hour * 60 + start_min
+                end_minutes = end_hour * 60 + end_min
+                
+                if start_minutes < end_minutes:
+                    if not (start_minutes <= current_minutes <= end_minutes):
+                        yield event.plain_result(f"现在还不能抽卡哦～，有效抽卡时间为{start_time} ～{end_time}")
+                        return
+                else:
+                    if not (current_minutes >= start_minutes or current_minutes <= end_minutes):
+                        yield event.plain_result(f"现在还不能抽卡哦～，有效抽卡时间为{start_time} ～{end_time}")
+                        return
+            
             limit = config.get("draw_hourly_limit", self.draw_hourly_limit_default)
             now_tm = time.localtime(now_ts)
             bucket = f"{now_tm.tm_year}-{now_tm.tm_yday}-{now_tm.tm_hour}"
@@ -1168,7 +1192,9 @@ class CCB_Plugin(Star):
             "系统设置 抽卡范围 [>5000]",
             f"———抽卡热度范围 | 当前值: {config.get('draw_scope', '无')}",
             "系统设置 牛头人 [0~100]",
-            f"———牛头人概率 | 当前值: {config.get('ntr_chance', 10)}"
+            f"———牛头人概率 | 当前值: {config.get('ntr_chance', 10)}",
+            "系统设置 可抽卡时间范围 HH:mm-HH:mm",
+            f"———可抽卡时间范围 | 当前值: {config.get('draw_time_range', '无限制')}"
         ]
         if feature is None:
             yield event.chain_result([Comp.Plain("\n".join(menu_lines))])
@@ -1246,6 +1272,27 @@ class CCB_Plugin(Star):
             config["ntr_chance"] = value
             await self.put_group_cfg(event.get_group_id(), config)
             yield event.plain_result(f"现在抽到别人对象有{value}%概率可牛")
+        elif feature == "可抽卡时间范围":
+            if value is None:
+                yield event.plain_result("用法：可抽卡时间范围 HH:mm-HH:mm")
+                return
+            time_range_match = re.search(r'^(\d{2}:\d{2})-(\d{2}:\d{2})$', str(value).strip())
+            if not time_range_match:
+                yield event.plain_result("用法：可抽卡时间范围 HH:mm-HH:mm")
+                return
+            start_time = time_range_match.group(1)
+            end_time = time_range_match.group(2)
+            start_hour, start_min = map(int, start_time.split(':'))
+            end_hour, end_min = map(int, end_time.split(':'))
+            if start_hour < 0 or start_hour > 23 or start_min < 0 or start_min > 59:
+                yield event.plain_result("开始时间无效")
+                return
+            if end_hour < 0 or end_hour > 23 or end_min < 0 or end_min > 59:
+                yield event.plain_result("结束时间无效")
+                return
+            config["draw_time_range"] = f"{start_time}-{end_time}"
+            await self.put_group_cfg(event.get_group_id(), config)
+            yield event.plain_result(f"可抽卡时间范围已设置为 {start_time} ～ {end_time}")
         else:
             yield event.chain_result([Comp.Plain("\n".join(menu_lines))]) 
 
