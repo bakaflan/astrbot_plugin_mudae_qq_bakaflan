@@ -10,6 +10,8 @@ import aiohttp
 from .util.character_manager import CharacterManager
 import random
 import asyncio
+import datetime
+import re
 
 DRAW_MSG_TTL = 45  # seconds to keep draw message records
 DRAW_MSG_INDEX_MAX = 300  # max tracked message ids to avoid unbounded growth
@@ -184,12 +186,11 @@ class CCB_Plugin(Star):
             config = await self.get_group_cfg(gid)
             
             time_range = config.get("draw_time_range")
-            if time_range:
-                import datetime
+            if time_range:                
                 tz = datetime.timezone(datetime.timedelta(hours=8))
                 now = datetime.datetime.now(tz)
                 current_minutes = now.hour * 60 + now.minute
-                start_time, end_time = time_range.split()
+                start_time, end_time = time_range.split('-')
                 start_hour, start_min = map(int, start_time.split(':'))
                 end_hour, end_min = map(int, end_time.split(':'))
                 start_minutes = start_hour * 60 + start_min
@@ -1192,7 +1193,7 @@ class CCB_Plugin(Star):
             f"———抽卡热度范围 | 当前值: {config.get('draw_scope', '无')}",
             "系统设置 牛头人 [0~100]",
             f"———牛头人概率 | 当前值: {config.get('ntr_chance', 10)}",
-            "系统设置 可抽卡时间范围 HH:mm HH:mm",
+            "系统设置 可抽卡时间范围 HH:mm-HH:mm",
             f"———可抽卡时间范围 | 当前值: {config.get('draw_time_range', '无限制')}"
         ]
         if feature is None:
@@ -1272,18 +1273,15 @@ class CCB_Plugin(Star):
             await self.put_group_cfg(event.get_group_id(), config)
             yield event.plain_result(f"现在抽到别人对象有{value}%概率可牛")
         elif feature == "可抽卡时间范围":
-            if value is None:
-                yield event.plain_result("用法：可抽卡时间范围 HH:mm HH:mm")
+            time_range_match = re.search(r'可抽卡时间范围\s+(\d{2}:\d{2})-(\d{2}:\d{2})', raw_message)
+            if not time_range_match:
+                yield event.plain_result("用法：可抽卡时间范围 HH:mm-HH:mm")
                 return
-            parts = str(value).strip().split()
-            if len(parts) != 2:
-                yield event.plain_result("用法：可抽卡时间范围 HH:mm HH:mm")
-                return
-            start_time, end_time = parts
-            import re
+            start_time = time_range_match.group(1)
+            end_time = time_range_match.group(2)
             time_pattern = r'^\d{2}:\d{2}$'
             if not re.match(time_pattern, start_time) or not re.match(time_pattern, end_time):
-                yield event.plain_result("时间格式错误，请使用 HH:mm 格式")
+                yield event.plain_result("时间格式错误，请使用 HH:mm-HH:mm 格式")
                 return
             start_hour, start_min = map(int, start_time.split(':'))
             end_hour, end_min = map(int, end_time.split(':'))
@@ -1293,7 +1291,7 @@ class CCB_Plugin(Star):
             if end_hour < 0 or end_hour > 23 or end_min < 0 or end_min > 59:
                 yield event.plain_result("结束时间无效")
                 return
-            config["draw_time_range"] = f"{start_time} {end_time}"
+            config["draw_time_range"] = f"{start_time}-{end_time}"
             await self.put_group_cfg(event.get_group_id(), config)
             yield event.plain_result(f"可抽卡时间范围已设置为 {start_time} ～ {end_time}")
         else:
