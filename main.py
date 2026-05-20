@@ -1273,16 +1273,15 @@ class CCB_Plugin(Star):
             await self.put_group_cfg(event.get_group_id(), config)
             yield event.plain_result(f"现在抽到别人对象有{value}%概率可牛")
         elif feature == "可抽卡时间范围":
-            time_range_match = re.search(r'可抽卡时间范围\s+(\d{2}:\d{2})-(\d{2}:\d{2})', raw_message)
+            if value is None:
+                yield event.plain_result("用法：可抽卡时间范围 HH:mm-HH:mm")
+                return
+            time_range_match = re.search(r'^(\d{2}:\d{2})-(\d{2}:\d{2})$', str(value).strip())
             if not time_range_match:
                 yield event.plain_result("用法：可抽卡时间范围 HH:mm-HH:mm")
                 return
             start_time = time_range_match.group(1)
             end_time = time_range_match.group(2)
-            time_pattern = r'^\d{2}:\d{2}$'
-            if not re.match(time_pattern, start_time) or not re.match(time_pattern, end_time):
-                yield event.plain_result("时间格式错误，请使用 HH:mm-HH:mm 格式")
-                return
             start_hour, start_min = map(int, start_time.split(':'))
             end_hour, end_min = map(int, end_time.split(':'))
             if start_hour < 0 or start_hour > 23 or start_min < 0 or start_min > 59:
